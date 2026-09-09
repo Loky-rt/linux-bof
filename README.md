@@ -38,6 +38,8 @@ This repository includes `bof.axs` for AdaptixC2 integration, but the BOFs thems
 | `chmod` | change permissions | - | Sync |
 | `df` | show the amount of available and used space on the disk file systems | - | Sync |
 | `load_elf` | Loader ELF in Memory | - | Async |
+| `mv` | move or rename files and directories | - | Sync |
+
 ---
 
 ## Supported Architectures

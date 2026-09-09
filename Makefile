@@ -38,6 +38,7 @@ bof: clean
 	@(gcc -c $(BOF_CFLAGS) $(BOF_INCLUDE) -o bofs_compile/chown.x64.o bofs/chown.c) && echo '[+] chown' || echo '[!] chown'
 	@(gcc -c $(BOF_CFLAGS) $(BOF_INCLUDE) -o bofs_compile/df.x64.o bofs/df.c) && echo '[+] df' || echo '[!] df'
 	@(gcc -c $(BOF_CFLAGS) $(BOF_INCLUDE) -o bofs_compile/load_elf.x64.o bofs/load_elf.c) && echo '[+] load_elf' || echo '[!] load_elf'
+	@(gcc -c $(BOF_CFLAGS) $(BOF_INCLUDE) -o bofs_compile/mv.x64.o bofs/mv.c) && echo '[+] mv' || echo '[!] mv'
 	@echo "Compiling BOFs for ARM64..."
 	@(aarch64-linux-gnu-gcc -c $(BOF_CFLAGS) $(BOF_CFLAGS_ARM64) $(BOF_INCLUDE) -o bofs_compile/service_enum.arm64.o bofs/service_enum.c) && echo '[+] service_enum' || echo '[!] service_enum'
 	@(aarch64-linux-gnu-gcc -c $(BOF_CFLAGS) $(BOF_CFLAGS_ARM64) $(BOF_INCLUDE) -o bofs_compile/container_detect.arm64.o bofs/container_detect.c) && echo '[+] container_detect' || echo '[!] container_detect'
@@ -65,5 +66,6 @@ bof: clean
 	@(aarch64-linux-gnu-gcc -c $(BOF_CFLAGS) $(BOF_CFLAGS_ARM64) $(BOF_INCLUDE) -o bofs_compile/chown.arm64.o bofs/chown.c) && echo '[+] chown' || echo '[!] chown'
 	@(aarch64-linux-gnu-gcc -c $(BOF_CFLAGS) $(BOF_CFLAGS_ARM64) $(BOF_INCLUDE) -o bofs_compile/df.arm64.o bofs/df.c) && echo '[+] df' || echo '[!] df'
 	@(aarch64-linux-gnu-gcc -c $(BOF_CFLAGS) $(BOF_CFLAGS_ARM64) $(BOF_INCLUDE) -o bofs_compile/load_elf.arm64.o bofs/load_elf.c) && echo '[+] load_elf' || echo '[!] load_elf'
+	@(aarch64-linux-gnu-gcc -c $(BOF_CFLAGS) $(BOF_CFLAGS_ARM64) $(BOF_INCLUDE) -o bofs_compile/mv.arm64.o bofs/mv.c) && echo '[+] mv' || echo '[!] mv'
 clean:
 	@(rm -rf bofs_compile)

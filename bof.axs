@@ -260,5 +260,19 @@ load_elf.setPreHook(function (id, cmdline, parsed_json) {
     ax.execute_alias(id, cmdline, `bof_async "${bof_path}" ${bof_params}`, "BOF: load_elf");
 });
 
-var group_commands = ax.create_commands_group("Post-exploitation", [load_elf, cmd_chown, cmd_chmod, cmd_df, cmd_persist_systemd, cmd_uptime, cmd_persist_cron, cmd_klist, cmd_keylog_start, cmd_keylog_dump, cmd_timestomp, cmd_portscan, cmd_nslookup, cmd_suid_scan, cmd_arp, cmd_sudo_check, cmd_ssh_keys, cmd_shadow_dump,cmd_service_enum, cmd_proc_enum, cmd_net_enum, cmd_ld_preload_check, cmd_kernel_exploit_check, cmd_host_recon, cmd_cred_harvest, cmd_container_detect]);
+// mv
+var cmd_mv = ax.create_command("mv", "move or rename files and directories", "mv file1 file2");
+cmd_mv.addArgString("file1", true, "source file");
+cmd_mv.addArgString("file2", true, "destination file");
+
+cmd_mv.setPreHook(function (id, cmdline, parsed_json) {
+    let file1 = parsed_json["file1"] || "";
+    let file2 = parsed_json["file2"] || "";
+
+    let bof_params = ax.bof_pack("cstr,cstr", [file1, file2]);
+    let bof_path = ax.script_dir() + "bofs_compile/mv." + ax.arch(id) + ".o";
+    ax.execute_alias(id, cmdline, `bof "${bof_path}" ${bof_params}`, "BOF: mv");
+});
+
+var group_commands = ax.create_commands_group("Post-exploitation", [cmd_mv, load_elf, cmd_chown, cmd_chmod, cmd_df, cmd_persist_systemd, cmd_uptime, cmd_persist_cron, cmd_klist, cmd_keylog_start, cmd_keylog_dump, cmd_timestomp, cmd_portscan, cmd_nslookup, cmd_suid_scan, cmd_arp, cmd_sudo_check, cmd_ssh_keys, cmd_shadow_dump,cmd_service_enum, cmd_proc_enum, cmd_net_enum, cmd_ld_preload_check, cmd_kernel_exploit_check, cmd_host_recon, cmd_cred_harvest, cmd_container_detect]);
 ax.register_commands_group(group_commands, ["NaxDarks"], ["linux"], []);
