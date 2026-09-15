@@ -95,12 +95,12 @@ cmd_arp.setPreHook(function (id, cmdline, parsed_json, ...parsed_lines) {
 });
 
 // nslookup
-var cmd_nslookup = ax.create_command("nslookup", "Make a DNS query", "nslookup google.com 8.8.8.8 | nslookup google.com,facebook.com 8.8.8.8");
+var cmd_nslookup = ax.create_command("nslookup", "Make a DNS query", "nslookup google.com 8.8.8.8 | nslookup google.com,facebook.com 8.8.8.8 | nslookup www.apple.com 8.8.8.8 | nslookup 192.168.100.101");
 cmd_nslookup.addArgString("domain", true, "domain, example: google.com");
-cmd_nslookup.addArgString("server", true, "DNS server, example: 8.8.8.8");
+cmd_nslookup.addArgString("server", false, "DNS server, example: 8.8.8.8");
 cmd_nslookup.setPreHook(function (id, cmdline, parsed_json, ...parsed_lines) {
     let domain = parsed_json["domain"];
-    let server = parsed_json["server"];
+    let server = parsed_json["server"] || "";
 
     let bof_params = ax.bof_pack("cstr,cstr", [domain, server]);
     let bof_path = ax.script_dir() + "bofs_compile/nslookup." + ax.arch(id) + ".o";

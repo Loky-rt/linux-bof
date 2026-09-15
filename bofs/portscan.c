@@ -1,6 +1,3 @@
-/// portscan.c — TCP port scanner with service fingerprinting
-/// gcc -c -o portscan.o portscan.c -include bof_api.h -Os -fPIC
-/// Args: BeaconDataParse — cstr(host), cstr(ports)
 #include "bof_api.h"
 
 #define AX_AF_INET       2
@@ -12,11 +9,14 @@
 #define AX_F_SETFL       4
 #define AX_O_NONBLOCK    2048
 #define AX_POLLOUT       4
+#define AX_POLLIN        1
 #define AX_ECONNREFUSED  111
 #define AX_ETIMEDOUT     110
 #define AX_EHOSTUNREACH  113
 #define AX_ENETUNREACH   101
 #define AX_EINPROGRESS   115
+
+#define AX_CLOCK_MONOTONIC 1
 
 struct ax_in_addr  { unsigned int s_addr; };
 struct ax_sockaddr_in {
@@ -27,23 +27,59 @@ struct ax_sockaddr_in {
 };
 struct ax_timeval { long tv_sec; long tv_usec; };
 struct ax_pollfd  { int fd; short events; short revents; };
+struct ax_timespec { long tv_sec; long tv_nsec; };
+
+extern int LIBC$clock_gettime(int clockid, struct ax_timespec *tp);
+
+static long ax_now_ms(void) {
+    struct ax_timespec ts;
+    if (LIBC$clock_gettime(AX_CLOCK_MONOTONIC, &ts) != 0) return 0;
+    return ts.tv_sec * 1000L + ts.tv_nsec / 1000000L;
+}
 
 #define PS_OPEN     1
 #define PS_CLOSED   2
 #define PS_FILTERED 3
 #define PS_ERROR    4
 
-#define CONNECT_TIMEOUT_MS 3000
+#define TIMEOUT_FAST    800
+#define TIMEOUT_NORMAL  1500
+#define TIMEOUT_DEFAULT 3000
+#define TIMEOUT_SLOW    5000
+#define WARMUP_PORTS    10
+#define HOST_DOWN_THRESHOLD 10
 
-/* Check if operator sent jobkill (cooperative stop) */
+typedef struct {
+    long total_rtt_ms;
+    int  n_rtt_samples;
+    int  n_filtered_early;
+    int  warmup_done;
+    int  adaptive_timeout;
+} ps_state_t;
+
+static ps_state_t g_ps;
+
+static void adjust_timeout(void) {
+    if (g_ps.n_rtt_samples == 0) {
+        g_ps.adaptive_timeout = TIMEOUT_SLOW;
+        return;
+    }
+    long avg = g_ps.total_rtt_ms / g_ps.n_rtt_samples;
+    if (avg < 100)       g_ps.adaptive_timeout = TIMEOUT_FAST;
+    else if (avg < 500)  g_ps.adaptive_timeout = TIMEOUT_NORMAL;
+    else if (avg < 1500) g_ps.adaptive_timeout = TIMEOUT_DEFAULT;
+    else                 g_ps.adaptive_timeout = TIMEOUT_SLOW;
+}
+
 static int should_stop(void) {
     int fd = BeaconGetStopJobEvent();
-    if (fd < 0) return 0; /* sync mode — no stop pipe */
+    if (fd < 0) return 0;
     struct ax_pollfd pfd;
-    pfd.fd = fd; pfd.events = 1; /* POLLIN */ pfd.revents = 0;
+    pfd.fd = fd; pfd.events = AX_POLLIN; pfd.revents = 0;
     return (AxPoll(&pfd, 1, 0) > 0) ? 1 : 0;
 }
-#define BANNER_TIMEOUT_S   2
+
+#define BANNER_TIMEOUT_S 2
 
 typedef struct { int port; const char *name; } portdb_t;
 static const portdb_t known[] = {
@@ -66,7 +102,7 @@ static const char *port_lookup(int p) {
 
 static const char *detect_service(const unsigned char *b, int len) {
     if (!b || len <= 0) return (const char *)0;
-    if (len >= 4 && b[0]=='S' && b[1]=='S' && b[2]=='H' && b[3]=='-')    return "SSH";
+    if (len >= 4 && b[0]=='S' && b[1]=='S' && b[2]=='H' && b[3]=='-') return "SSH";
     if (len >= 5 && b[0]=='H' && b[1]=='T' && b[2]=='T' && b[3]=='P' && b[4]=='/') return "HTTP";
     if (len >= 6 && (AxStrncmp((const char*)b,"<html>",6)==0||AxStrncmp((const char*)b,"<HTML>",6)==0)) return "HTTP";
     if (len >= 9 && AxStrncmp((const char*)b,"<!DOCTYPE",9)==0) return "HTTP";
@@ -77,15 +113,15 @@ static const char *detect_service(const unsigned char *b, int len) {
         if (AxStrstr((const char*)b,"SMTP")||AxStrstr((const char*)b,"smtp")||AxStrstr((const char*)b,"Postfix")) return "SMTP";
         return "FTP/SMTP";
     }
-    if (len >= 4 && b[0]=='+' && b[1]=='O' && b[2]=='K')       return "POP3";
+    if (len >= 4 && b[0]=='+' && b[1]=='O' && b[2]=='K') return "POP3";
     if (len >= 4 && b[0]=='*' && b[1]==' ' && b[2]=='O' && b[3]=='K') return "IMAP";
-    if (len >= 5 && AxStrncmp((const char*)b,"-ERR ",5)==0)     return "Redis";
-    if (len >= 1 && b[0]=='$')                                   return "Redis";
-    if (len >= 4 && b[0]=='R' && b[1]=='F' && b[2]=='B')        return "VNC";
-    if (len >= 5 && b[3]==0x00 && b[4]==0x0a)                    return "MySQL";
+    if (len >= 5 && AxStrncmp((const char*)b,"-ERR ",5)==0) return "Redis";
+    if (len >= 1 && b[0]=='$') return "Redis";
+    if (len >= 4 && b[0]=='R' && b[1]=='F' && b[2]=='B') return "VNC";
+    if (len >= 5 && b[3]==0x00 && b[4]==0x0a) return "MySQL";
     if (len >= 8 && b[4]==0xff && b[5]=='S' && b[6]=='M' && b[7]=='B') return "SMB";
-    if (len >= 7 && b[0]==0x03 && b[1]==0x00 && b[4]==0xd0)     return "RDP";
-    if (len >= 1 && (b[0]=='{' || b[0]=='['))                    return "JSON-API";
+    if (len >= 7 && b[0]==0x03 && b[1]==0x00 && b[4]==0xd0) return "RDP";
+    if (len >= 1 && (b[0]=='{' || b[0]=='[')) return "JSON-API";
     return (const char *)0;
 }
 
@@ -100,30 +136,34 @@ static void extract_banner(const unsigned char *raw, int rawlen, char *out, int 
     out[o] = '\0';
 }
 
-/* ── Non-blocking connect with hard timeout via poll ── */
-
 static int nb_connect(int sock, struct ax_sockaddr_in *addr, int timeout_ms) {
-    /* Set non-blocking */
+    long t0 = ax_now_ms();
+
     int flags = AxFcntl(sock, AX_F_GETFL, 0);
     if (flags < 0) flags = 0;
     AxFcntl(sock, AX_F_SETFL, flags | AX_O_NONBLOCK);
 
     int rc = AxConnect(sock, addr, sizeof(struct ax_sockaddr_in));
+
     if (rc == 0) {
-        /* Connected immediately (localhost etc) */
-        AxFcntl(sock, AX_F_SETFL, flags); /* restore blocking */
+        AxFcntl(sock, AX_F_SETFL, flags);
+        long rtt = ax_now_ms() - t0;
+        if (g_ps.n_rtt_samples < 1000) { g_ps.total_rtt_ms += rtt; g_ps.n_rtt_samples++; }
         return PS_OPEN;
     }
 
     int err = AxGetErrno();
     if (err != AX_EINPROGRESS) {
         AxFcntl(sock, AX_F_SETFL, flags);
-        if (err == AX_ECONNREFUSED) return PS_CLOSED;
+        long rtt = ax_now_ms() - t0;
+        if (err == AX_ECONNREFUSED) {
+            if (g_ps.n_rtt_samples < 1000) { g_ps.total_rtt_ms += rtt; g_ps.n_rtt_samples++; }
+            return PS_CLOSED;
+        }
         if (err == AX_EHOSTUNREACH || err == AX_ENETUNREACH) return PS_ERROR;
         return PS_CLOSED;
     }
 
-    /* Wait for connect with hard timeout */
     struct ax_pollfd pfd;
     pfd.fd = sock;
     pfd.events = AX_POLLOUT;
@@ -132,24 +172,27 @@ static int nb_connect(int sock, struct ax_sockaddr_in *addr, int timeout_ms) {
     int pr = AxPoll(&pfd, 1, timeout_ms);
 
     if (pr <= 0) {
-        /* Timeout or error → filtered */
         AxFcntl(sock, AX_F_SETFL, flags);
         return PS_FILTERED;
     }
 
-    /* Check SO_ERROR */
     int so_error = 0;
     int elen = 4;
     AxGetsockopt(sock, AX_SOL_SOCKET, AX_SO_ERROR, &so_error, &elen);
 
-    AxFcntl(sock, AX_F_SETFL, flags); /* restore blocking */
+    AxFcntl(sock, AX_F_SETFL, flags);
 
-    if (so_error == 0) return PS_OPEN;
-    if (so_error == AX_ECONNREFUSED) return PS_CLOSED;
+    long rtt = ax_now_ms() - t0;
+    if (so_error == 0) {
+        if (g_ps.n_rtt_samples < 1000) { g_ps.total_rtt_ms += rtt; g_ps.n_rtt_samples++; }
+        return PS_OPEN;
+    }
+    if (so_error == AX_ECONNREFUSED) {
+        if (g_ps.n_rtt_samples < 1000) { g_ps.total_rtt_ms += rtt; g_ps.n_rtt_samples++; }
+        return PS_CLOSED;
+    }
     return PS_FILTERED;
 }
-
-/* ── Scan one port ── */
 
 static int scan_port(const char *host, int port, char *svc, int svc_cap,
                      char *banner, int banner_cap) {
@@ -165,13 +208,12 @@ static int scan_port(const char *host, int port, char *svc, int svc_cap,
     addr.sin_port = AxHtons((unsigned short)port);
     AxInetPton(AX_AF_INET, host, &addr.sin_addr);
 
-    int state = nb_connect(sock, &addr, CONNECT_TIMEOUT_MS);
+    int state = nb_connect(sock, &addr, g_ps.adaptive_timeout);
     if (state != PS_OPEN) {
         AxClose(sock);
         return state;
     }
 
-    /* === Phase 1: passive banner === */
     struct ax_timeval rtv = {BANNER_TIMEOUT_S, 0};
     AxSetsockopt(sock, AX_SOL_SOCKET, AX_SO_RCVTIMEO, &rtv, sizeof(rtv));
 
@@ -193,7 +235,6 @@ static int scan_port(const char *host, int port, char *svc, int svc_cap,
         return PS_OPEN;
     }
 
-    /* === Phase 2: HTTP probe === */
     const char *probe = "HEAD / HTTP/1.0\r\nHost: t\r\nConnection: close\r\n\r\n";
     AxSend(sock, probe, AxStrlen(probe), 0);
     AxMemset(buf, 0, sizeof(buf));
@@ -231,6 +272,39 @@ static const char *state_str(int s) {
     if (s==PS_FILTERED) return "FILTERED"; return "ERROR";
 }
 
+static int scan_one(const char *host, int port, char *svc, int svc_cap,
+                    char *ban, int ban_cap, int *out_n_early_filtered) {
+    int st = scan_port(host, port, svc, svc_cap, ban, ban_cap);
+    if (!g_ps.warmup_done) {
+        if (st == PS_FILTERED) {
+            g_ps.n_filtered_early++;
+            if (out_n_early_filtered) (*out_n_early_filtered)++;
+        }
+    }
+    return st;
+}
+
+static void print_header(const char *host) {
+    BeaconPrintf(CALLBACK_OUTPUT, "\n\xe2\x94\x8c\xe2\x94\x80 Port Scan: %s\n", host);
+    BeaconPrintf(CALLBACK_OUTPUT, "\xe2\x94\x82  %-7s %-10s %-14s %s\n",
+                 "PORT", "STATE", "SERVICE", "BANNER");
+    BeaconPrintf(CALLBACK_OUTPUT,
+        "\xe2\x94\x82  "
+        "\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80"
+        "\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80"
+        "\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80"
+        "\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80"
+        "\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80"
+        "\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80"
+        "\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80"
+        "\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80"
+        "\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80"
+        "\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80"
+        "\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80"
+        "\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80"
+        "\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\n");
+}
+
 void go(char *args, int args_len) {
     datap parser;
     BeaconDataParse(&parser, args, args_len);
@@ -244,11 +318,10 @@ void go(char *args, int args_len) {
         return;
     }
 
-    BeaconPrintf(CALLBACK_OUTPUT, "\n\xe2\x94\x8c\xe2\x94\x80 Port Scan: %s\n", host);
-    BeaconPrintf(CALLBACK_OUTPUT, "\xe2\x94\x82  %-7s %-10s %-14s %s\n",
-                 "PORT", "STATE", "SERVICE", "BANNER");
-    BeaconPrintf(CALLBACK_OUTPUT,
-        "\xe2\x94\x82  \xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\n");
+    AxMemset(&g_ps, 0, sizeof(g_ps));
+    g_ps.adaptive_timeout = TIMEOUT_DEFAULT;
+
+    print_header(host);
 
     char portbuf[4096];
     int pbl = AxStrlen(ports); if (pbl>4095) pbl=4095;
@@ -263,19 +336,44 @@ void go(char *args, int args_len) {
         int s = str_to_int(portbuf), e = str_to_int(dash+1);
         if (!valid_port(s)) s=1; if (!valid_port(e)) e=65535;
         if (s>e){int t=s;s=e;e=t;}
+
         for (int p=s; p<=e; p++) {
             if (should_stop()) {
-                BeaconPrintf(CALLBACK_OUTPUT, "\xe2\x94\x82  [!] Stopped by operator at port %d\n", p);
+                BeaconPrintf(CALLBACK_OUTPUT,
+                    "\xe2\x94\x82  [!] Stopped by operator at port %d\n", p);
                 break;
             }
+
             char svc[32], ban[80];
-            int st = scan_port(host, p, svc, sizeof(svc), ban, sizeof(ban));
+            int st = scan_one(host, p, svc, sizeof(svc), ban, sizeof(ban), 0);
             n_scanned++;
+
             if (st==PS_OPEN) {
-                BeaconPrintf(CALLBACK_OUTPUT, "\xe2\x94\x82  %-7d %-10s %-14s %s\n", p,"OPEN",svc,ban);
+                BeaconPrintf(CALLBACK_OUTPUT,
+                    "\xe2\x94\x82  %-7d %-10s %-14s %s\n", p,"OPEN",svc,ban);
                 n_open++;
             } else if (st==PS_FILTERED) n_filtered++;
             else n_closed++;
+
+            if (!g_ps.warmup_done && n_scanned >= WARMUP_PORTS) {
+                g_ps.warmup_done = 1;
+                adjust_timeout();
+
+                long avg = g_ps.n_rtt_samples ?
+                    g_ps.total_rtt_ms / g_ps.n_rtt_samples : 0;
+                BeaconPrintf(CALLBACK_OUTPUT,
+                    "\xe2\x94\x82  [*] Warmup done: avg=%ldms samples=%d "
+                    "filtered=%d \xe2\x86\x92 timeout=%dms\n",
+                    avg, g_ps.n_rtt_samples, g_ps.n_filtered_early,
+                    g_ps.adaptive_timeout);
+
+                if (g_ps.n_filtered_early >= HOST_DOWN_THRESHOLD) {
+                    BeaconPrintf(CALLBACK_OUTPUT,
+                        "\xe2\x94\x82  [!] Host appears unreachable / heavily filtered (%d timeouts in first %d ports), aborting\n",
+                        g_ps.n_filtered_early, WARMUP_PORTS);
+                    break;
+                }
+            }
         }
     } else {
         char *tok = portbuf;
@@ -284,15 +382,28 @@ void go(char *args, int args_len) {
             if (comma) *comma = '\0';
             int p = str_to_int(tok);
             if (valid_port(p)) {
+                if (should_stop()) {
+                    BeaconPrintf(CALLBACK_OUTPUT,
+                        "\xe2\x94\x82  [!] Stopped by operator at port %d\n", p);
+                    break;
+                }
+
                 char svc[32], ban[80];
-                int st = scan_port(host, p, svc, sizeof(svc), ban, sizeof(ban));
+                int st = scan_one(host, p, svc, sizeof(svc), ban, sizeof(ban), 0);
                 n_scanned++;
                 if (st==PS_OPEN) {
-                    BeaconPrintf(CALLBACK_OUTPUT, "\xe2\x94\x82  %-7d %-10s %-14s %s\n", p,"OPEN",svc,ban);
+                    BeaconPrintf(CALLBACK_OUTPUT,
+                        "\xe2\x94\x82  %-7d %-10s %-14s %s\n", p,"OPEN",svc,ban);
                     n_open++;
                 } else {
-                    BeaconPrintf(CALLBACK_OUTPUT, "\xe2\x94\x82  %-7d %-10s\n", p, state_str(st));
+                    BeaconPrintf(CALLBACK_OUTPUT,
+                        "\xe2\x94\x82  %-7d %-10s\n", p, state_str(st));
                     if (st==PS_FILTERED) n_filtered++; else n_closed++;
+                }
+
+                if (!g_ps.warmup_done && n_scanned >= WARMUP_PORTS) {
+                    g_ps.warmup_done = 1;
+                    adjust_timeout();
                 }
             }
             tok = comma ? comma+1 : (char*)0;
@@ -301,8 +412,10 @@ void go(char *args, int args_len) {
 
     char s[128];
     if (n_filtered > 0)
-        AxSnprintf(s,sizeof(s),"%d open, %d closed, %d filtered / %d scanned", n_open,n_closed,n_filtered,n_scanned);
+        AxSnprintf(s,sizeof(s),"%d open, %d closed, %d filtered / %d scanned",
+                   n_open, n_closed, n_filtered, n_scanned);
     else
-        AxSnprintf(s,sizeof(s),"%d open, %d closed / %d scanned", n_open,n_closed,n_scanned);
+        AxSnprintf(s,sizeof(s),"%d open, %d closed / %d scanned",
+                   n_open, n_closed, n_scanned);
     BeaconPrintf(CALLBACK_OUTPUT, "\xe2\x94\x94\xe2\x94\x80 %s\n\n", s);
 }

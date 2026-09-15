@@ -1,9 +1,9 @@
-BOF_CFLAGS = -Os -fPIC -ffunction-sections -fdata-sections -fno-unwind-tables \
+BOF_CFLAGS = -Os -ffunction-sections -fdata-sections -fno-unwind-tables \
              -fno-asynchronous-unwind-tables \
-             -fno-ident -fno-builtin -fno-common -g0 -s -Wl,--gc-sections \
+             -fno-ident -fno-builtin -fno-common -g0 \
              -Wno-unused-parameter -Wno-unused-variable -Wno-unused-but-set-variable -ffreestanding
 
-BOF_CFLAGS_ARM64 = -mno-outline-atomics
+BOF_CFLAGS_ARM64 = -mno-outline-atomics -fPIC
 
 BOF_INCLUDE = -I include
 
