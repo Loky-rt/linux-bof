@@ -40,6 +40,7 @@ bof: clean
 	@(gcc -c $(BOF_CFLAGS) $(BOF_INCLUDE) -o bofs_compile/load_elf.x64.o bofs/load_elf.c) && echo '[+] load_elf' || echo '[!] load_elf'
 	@(gcc -c $(BOF_CFLAGS) $(BOF_INCLUDE) -o bofs_compile/mv.x64.o bofs/mv.c) && echo '[+] mv' || echo '[!] mv'
 	@(gcc -c $(BOF_CFLAGS) $(BOF_INCLUDE) -o bofs_compile/recon_lb.x64.o bofs/recon_lb.c) && echo '[+] recon_lb' || echo '[!] recon_lb'
+	@(gcc -c $(BOF_CFLAGS) $(BOF_INCLUDE) -o bofs_compile/so_inject.x64.o bofs/so_inject.c) && echo '[+] so_inject' || echo '[!] so_inject'
 	@echo "Compiling BOFs for ARM64..."
 	@(aarch64-linux-gnu-gcc -c $(BOF_CFLAGS) $(BOF_CFLAGS_ARM64) $(BOF_INCLUDE) -o bofs_compile/service_enum.arm64.o bofs/service_enum.c) && echo '[+] service_enum' || echo '[!] service_enum'
 	@(aarch64-linux-gnu-gcc -c $(BOF_CFLAGS) $(BOF_CFLAGS_ARM64) $(BOF_INCLUDE) -o bofs_compile/container_detect.arm64.o bofs/container_detect.c) && echo '[+] container_detect' || echo '[!] container_detect'
@@ -69,5 +70,6 @@ bof: clean
 	@(aarch64-linux-gnu-gcc -c $(BOF_CFLAGS) $(BOF_CFLAGS_ARM64) $(BOF_INCLUDE) -o bofs_compile/load_elf.arm64.o bofs/load_elf.c) && echo '[+] load_elf' || echo '[!] load_elf'
 	@(aarch64-linux-gnu-gcc -c $(BOF_CFLAGS) $(BOF_CFLAGS_ARM64) $(BOF_INCLUDE) -o bofs_compile/mv.arm64.o bofs/mv.c) && echo '[+] mv' || echo '[!] mv'
 	@(aarch64-linux-gnu-gcc -c $(BOF_CFLAGS) $(BOF_CFLAGS_ARM64) $(BOF_INCLUDE) -o bofs_compile/recon_lb.arm64.o bofs/recon_lb.c) && echo '[+] recon_lb' || echo '[!] recon_lb'
+	@(aarch64-linux-gnu-gcc -c $(BOF_CFLAGS) $(BOF_CFLAGS_ARM64) $(BOF_INCLUDE) -o bofs_compile/so_inject.arm64.o bofs/so_inject.c) && echo '[+] so_inject' || echo '[!] so_inject'
 clean:
 	@(rm -rf bofs_compile)

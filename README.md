@@ -39,6 +39,8 @@ This repository includes `bof.axs` for AdaptixC2 integration, but the BOFs thems
 | `df` | show the amount of available and used space on the disk file systems | - | Sync |
 | `load_elf` | Loader ELF in Memory | - | Async |
 | `mv` | move or rename files and directories | - | Sync |
+| `recon_lb` | Locate LIBXXX in system processes | - | Sync |
+| `so_inject` | Inject a .so into a running process via remote dlopen | - | Sync |
 
 ---
 
