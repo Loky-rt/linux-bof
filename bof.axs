@@ -250,11 +250,10 @@ load_elf.addArgFile("path", true, "Path to ELF");
 load_elf.addArgString("params", false, "params ELF");
 load_elf.setPreHook(function (id, cmdline, parsed_json) {
 
-    let elf_b64 = parsed_json["path"] || "";
+    let elf = parsed_json["path"] || "";
     let elf_params = parsed_json["params"] || "";
 
-    let elf_raw = ax.decode_data("base64", elf_b64);
-    let bof_params = ax.bof_pack("bytes,cstr", [elf_raw, elf_params]);
+    let bof_params = ax.bof_pack("bytes,cstr", [elf, elf_params]);
 
     let bof_path = ax.script_dir() + "bofs_compile/load_elf." + ax.arch(id) + ".o";
     ax.execute_alias(id, cmdline, `bof_async "${bof_path}" ${bof_params}`, "BOF: load_elf");
@@ -295,10 +294,9 @@ so_inject.setPreHook(function (id, cmdline, parsed_json) {
 
     let PID = parsed_json["PID"] || "";
     let memname = parsed_json["memname"] || "";
-    let so_b64 = parsed_json["path"] || "";
+    let so = parsed_json["path"] || "";
 
-    let so_raw = ax.decode_data("base64", so_b64);
-    let bof_params = ax.bof_pack("int,cstr,bytes", [PID, memname, so_raw]);
+    let bof_params = ax.bof_pack("int,cstr,bytes", [PID, memname, so]);
 
     let bof_path = ax.script_dir() + "bofs_compile/so_inject." + ax.arch(id) + ".o";
     ax.execute_alias(id, cmdline, `bof_async "${bof_path}" ${bof_params}`, "BOF: so_inject");
